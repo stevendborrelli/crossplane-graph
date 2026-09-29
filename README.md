@@ -45,7 +45,7 @@ To try it, install the prototype's release chart:
 
 ```shell
 helm install crossplane oci://ghcr.io/stevendborrelli/charts/crossplane \
-  --version 2.5.0-ordering.1 -n crossplane-system --create-namespace
+  --version 2.5.0-ordering.2 -n crossplane-system --create-namespace
 ```
 
 [pr]: https://github.com/crossplane/crossplane/pull/7842
