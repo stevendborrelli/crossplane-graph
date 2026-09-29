@@ -119,7 +119,7 @@ const (
 // A style is how the tree is presented: whether it is painted, and whether
 // each resource's dependencies get their own lines beneath it.
 //
-// Colour is off when stdout isn't a terminal, so piping to a file or a pager
+// Color is off when stdout isn't a terminal, so piping to a file or a pager
 // stays readable.
 type style struct {
 	color bool
@@ -144,7 +144,7 @@ func (s style) paint(code, text string) string {
 }
 
 // glyph and color are how a state reads at a glance: the shape carries the
-// meaning where colour isn't available, so both say the same thing.
+// meaning where color isn't available, so both say the same thing.
 func (n node) glyph() (string, string) {
 	switch n.state() {
 	case stateReady:

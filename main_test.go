@@ -287,7 +287,7 @@ func TestRenderTreeColor(t *testing.T) {
 
 	got := renderTree(xr(), nodes, style{color: true})
 
-	// The glyph carries the state where colour isn't available, so both
+	// The glyph carries the state where color isn't available, so both
 	// should be present when it is.
 	if !strings.Contains(got, "\x1b[32m✔") {
 		t.Errorf("renderTree(...): want a green tick, got:\n%q", got)
