@@ -113,9 +113,6 @@ Everything comes from the API server. It never runs a function.
   resources agrees. The two can briefly disagree, for example showing a
   dependency ready while its dependent is still blocked on it, until
   Crossplane's next reconcile.
-- **During teardown, a resource that has finished deleting is shown as
-  `pending`**, the label for one that doesn't exist yet. Its reference outlives
-  the object for a moment.
 
 ## License
 

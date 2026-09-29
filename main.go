@@ -49,6 +49,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -88,8 +89,10 @@ type node struct {
 
 	// Live state, read from the composed resource itself.
 	Exists   bool
+	Missing  bool // The API server said there is no such object.
 	Ready    bool
 	Deleting bool
+	Deleted  bool   // Gone, and the XR is being torn down, so it won't return.
 	Reason   string // Why it isn't ready, when it says.
 
 	// Held state, read from the XR's status rather than from the resource.
@@ -103,14 +106,15 @@ type node struct {
 	wave int
 }
 
-// The states a node can be in. A resource reaches ready, creating, pending
-// and deleting on its own; blocked, held and deadlocked are the graph's
-// doing, and are the states this tool exists to explain.
+// The states a node can be in. A resource reaches ready, creating, pending,
+// deleting and deleted on its own; blocked, held and deadlocked are the
+// graph's doing, and are the states this tool exists to explain.
 const (
 	stateReady      = "ready"
 	stateCreating   = "creating"
 	statePending    = "pending"
 	stateDeleting   = "deleting"
+	stateDeleted    = "deleted"
 	stateBlocked    = "blocked"
 	stateHeld       = "held"
 	stateDeadlocked = "deadlocked"
@@ -157,6 +161,8 @@ func (n node) glyph() (string, string) {
 		return "⨯", red
 	case stateBlocked, stateHeld:
 		return "⊘", yellow
+	case stateDeleted:
+		return "–", gray
 	default:
 		return "○", gray
 	}
@@ -180,6 +186,8 @@ func (n node) state() string {
 		return stateBlocked
 	case n.Deleting:
 		return stateDeleting
+	case n.Deleted:
+		return stateDeleted
 	case !n.Exists:
 		return statePending
 	case n.Ready:
@@ -225,6 +233,7 @@ func (c *cli) Run() error {
 	// Last, because it overrides both: what the XR says the graph is holding
 	// back, including resources that have no reference to observe.
 	nodes = readPending(xr, nodes)
+	markDeleted(xr, nodes)
 
 	out := renderTree(xr, nodes, style{color: c.colorize(), edges: c.Edges})
 	if c.Dot {
@@ -512,6 +521,10 @@ func observe(ctx context.Context, dyn dynamic.Interface, mapper meta.RESTMapper,
 		}
 
 		if err != nil {
+			// Only a definite "not found" says the object is gone. Anything
+			// else - a permissions error, a timeout - says only that it
+			// couldn't be read, which is no evidence either way.
+			n.Missing = kerrors.IsNotFound(err)
 			continue
 		}
 
@@ -521,6 +534,28 @@ func observe(ctx context.Context, dyn dynamic.Interface, mapper meta.RESTMapper,
 
 		if !n.Ready {
 			n.Reason = notReadyReason(got)
+		}
+	}
+}
+
+// markDeleted marks the resources an XR's teardown has already removed.
+//
+// A reference with no object behind it is otherwise pending: Crossplane
+// writes the reference before it applies the resource, so for a moment that
+// is exactly right. During teardown it means the opposite - the object was
+// deleted, and its reference simply hasn't been dropped yet - and reading it
+// as pending suggests Crossplane is about to create it.
+//
+// A resource the graph is holding back is left alone: its held state is the
+// more useful answer.
+func markDeleted(xr *unstructured.Unstructured, nodes []*node) {
+	if xr.GetDeletionTimestamp() == nil {
+		return
+	}
+
+	for _, n := range nodes {
+		if n.Missing && !n.Held {
+			n.Deleted = true
 		}
 	}
 }
@@ -878,6 +913,7 @@ func renderTally(w *strings.Builder, counts map[string]int, st style) {
 		{statePending, gray},
 		{stateHeld, yellow},
 		{stateDeleting, red},
+		{stateDeleted, gray},
 		{stateDeadlocked, red},
 	} {
 		if counts[s.state] > 0 {
@@ -1007,6 +1043,8 @@ func dotStyle(n *node) string {
 		return " style=\"rounded,bold\""
 	case statePending:
 		return " style=\"rounded,dashed\""
+	case stateDeleted:
+		return " style=\"rounded,dotted\""
 	default:
 		return ""
 	}

@@ -22,6 +22,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -239,6 +240,11 @@ func TestState(t *testing.T) {
 			reason: "Deleting wins over ready: a resource on its way out is what teardown is waiting for.",
 			node:   node{Exists: true, Ready: true, Deleting: true},
 			want:   "deleting",
+		},
+		"Deleted": {
+			reason: "A resource teardown has removed is deleted, not pending: it isn't coming back.",
+			node:   node{Missing: true, Deleted: true},
+			want:   "deleted",
 		},
 	}
 
@@ -529,5 +535,55 @@ func TestRenderTreeEdgesAreOptIn(t *testing.T) {
 
 	if offN, onN := strings.Count(off, "\n"), strings.Count(on, "\n"); offN >= onN {
 		t.Errorf("renderTree(...) without --edges should be shorter: %d lines vs %d", offN, onN)
+	}
+}
+
+func TestMarkDeleted(t *testing.T) {
+	cases := map[string]struct {
+		reason   string
+		deleting bool
+		node     node
+		want     string
+	}{
+		"AboutToBeCreated": {
+			reason: "Crossplane writes a reference before it applies the resource, so a live XR's missing object is pending.",
+			node:   node{Missing: true},
+			want:   "pending",
+		},
+		"GoneDuringTeardown": {
+			reason:   "During teardown a missing object has been deleted, and its reference just hasn't been dropped yet.",
+			deleting: true,
+			node:     node{Missing: true},
+			want:     "deleted",
+		},
+		"Unreadable": {
+			reason:   "An object that couldn't be read, for a reason other than not existing, is no evidence it was deleted.",
+			deleting: true,
+			node:     node{},
+			want:     "pending",
+		},
+		"Held": {
+			reason:   "What the graph is holding back is the more useful answer than what the resource is doing.",
+			deleting: true,
+			node:     node{Missing: true, Held: true, Operation: "Delete"},
+			want:     "held",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			x := xr()
+			if tc.deleting {
+				now := metav1.Now()
+				x.SetDeletionTimestamp(&now)
+			}
+
+			n := tc.node
+			markDeleted(x, []*node{&n})
+
+			if got := n.state(); got != tc.want {
+				t.Errorf("state() after markDeleted: want %q, got %q\n%s", tc.want, got, tc.reason)
+			}
+		})
 	}
 }
