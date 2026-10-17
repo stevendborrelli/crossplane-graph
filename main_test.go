@@ -383,6 +383,19 @@ func TestReadDependsOnBothForms(t *testing.T) {
 			wantComposed: []string{"vpc"},
 			wantRequires: []string{"cluster-kubeconfig"},
 		},
+		"RenamedFields": {
+			reason: "A composed dependency is named by resourceName, and a requirement by requirementName - requirement.name is then the matched object, not the requirement.",
+			ref: map[string]any{"dependsOn": []any{
+				map[string]any{"resourceName": "vpc"},
+				map[string]any{"resourceName": "subnet", "type": "ComposedResource"},
+				map[string]any{
+					"type":        "RequiredResource",
+					"requirement": map[string]any{"requirementName": "cluster-kubeconfig", "name": "prod-kubeconfig"},
+				},
+			}},
+			wantComposed: []string{"vpc", "subnet"},
+			wantRequires: []string{"cluster-kubeconfig"},
+		},
 		"Mixed": {
 			reason:       "Nothing stops a cluster carrying both during a migration.",
 			ref:          map[string]any{"dependsOn": []any{"vpc", map[string]any{"name": "subnet"}}},

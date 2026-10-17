@@ -387,14 +387,18 @@ func readGraph(xr *unstructured.Unstructured) ([]*node, error) {
 	return nodes, nil
 }
 
-// readDependsOn reads an entry's edges, in either form they take.
+// readDependsOn reads an entry's edges, in any form they take.
 //
 // dependsOn started as a list of composition resource names and is becoming a
 // list of objects, so that an edge can say what kind of thing it points at -
 // another composed resource, or a resource the pipeline required rather than
-// composed. Reading both means one crossplane-graph works against a cluster on either
-// side of that change, which matters because the whole point of this tool is
-// looking at a cluster you did not build.
+// composed. The objects' field names then changed too, so that resourceName is
+// always a composition resource name and name always an object's name: a
+// composed dependency moved from name to resourceName, and a requirement's name
+// from requirement.name to requirement.requirementName, with requirement.name
+// now the matched object. Reading every form means one crossplane-graph works
+// against a cluster on any side of those changes, which matters because the
+// whole point of this tool is looking at a cluster you did not build.
 func readDependsOn(ref map[string]any) (composed, requires []string) {
 	raw, found, err := unstructured.NestedSlice(ref, "dependsOn")
 	if err != nil || !found {
@@ -408,7 +412,14 @@ func readDependsOn(ref map[string]any) (composed, requires []string) {
 		case map[string]any:
 			t, _, _ := unstructured.NestedString(v, "type")
 			if t == "RequiredResource" {
-				name, _, _ := unstructured.NestedString(v, "requirement", "name")
+				// requirement.name was the requirement before it was the
+				// matched object, so it's only the requirement when
+				// requirementName is absent.
+				name, _, _ := unstructured.NestedString(v, "requirement", "requirementName")
+				if name == "" {
+					name, _, _ = unstructured.NestedString(v, "requirement", "name")
+				}
+
 				if name != "" {
 					requires = append(requires, name)
 				}
@@ -416,7 +427,12 @@ func readDependsOn(ref map[string]any) (composed, requires []string) {
 				continue
 			}
 
-			if name, _, _ := unstructured.NestedString(v, "name"); name != "" {
+			name, _, _ := unstructured.NestedString(v, "resourceName")
+			if name == "" {
+				name, _, _ = unstructured.NestedString(v, "name")
+			}
+
+			if name != "" {
 				composed = append(composed, name)
 			}
 		}
