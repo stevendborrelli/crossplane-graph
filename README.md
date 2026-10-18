@@ -87,6 +87,44 @@ watch -c -n1 crossplane-graph xordering/ordered -n default --color always
 | `--dot` | Print Graphviz DOT instead of a tree. |
 | `--color` | `auto`, `always` or `never`. |
 | `--timeout` | How long to spend talking to the API server. Defaults to 30s. |
+| `--serve` | Serve a live web view at this address, such as `localhost:8080`, rather than printing. |
+| `--interval` | How often the web view reads the graph again. Defaults to 2s. |
+
+### The web view
+
+```shell
+crossplane-graph xordering/ordered -n default --serve localhost:8080
+```
+
+`--serve` draws the same graph in a browser and keeps it current: a column per
+wave, a box per composed resource, and a line for each dependency, running from
+what a resource depends on to the resource. A line is green once its dependency
+is ready, and dashed while the resource it leads to is still pending. Click a
+resource for its object name, its reason, and what depends on it. Deadlocks and
+cycles are called out at the top.
+
+The graph is read every `--interval` by one poller, however many pages are
+open, and pushed to them as server-sent events. A read that fails keeps the
+last graph on screen, marked stale. If the composite is deleted, the page says
+so, and fills in again when it's recreated.
+
+It listens only where you tell it to. `localhost:8080` stays on your machine;
+`:8080` serves anyone who can reach it, with your kubeconfig's access to the
+cluster behind it.
+
+The page is a Svelte app in [`web/`](web), built into `web/dist` and embedded in
+the binary, so `go install` gets it without Node. Its boxes and connectors come
+from Steven Borrelli's XPlanet primitives, copied into
+[`web/src/lib/xplanet`](web/src/lib/xplanet). After changing anything under
+`web/src`, rebuild it and commit the result:
+
+```shell
+(cd web && npm ci)
+go generate ./...
+```
+
+`npm --prefix web run dev` serves the page with hot reload, proxying the API to
+a `crossplane-graph --serve localhost:8080` running alongside.
 
 ## What it reads
 

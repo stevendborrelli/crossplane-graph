@@ -38,6 +38,7 @@ limitations under the License.
 //	crossplane-graph xordering/ordered -n default
 //	crossplane-graph xordering/ordered --edges          # and what each one waits on
 //	crossplane-graph servingstack/my-stack -n modelplane-system --dot | dot -Tpng -o graph.png
+//	crossplane-graph servingstack/my-stack -n modelplane-system --serve localhost:8080
 package main
 
 import (
@@ -71,6 +72,9 @@ type cli struct {
 	Edges   bool          `help:"Print each resource's dependencies beneath it, rather than only the waves." short:"e"`
 	Color   string        `default:"auto"                                                                    enum:"auto,always,never"                            help:"Colorize the tree."`
 	Timeout time.Duration `default:"30s"                                                                     help:"How long to spend talking to the API server."`
+
+	Serve    string        `help:"Serve a live web view of the graph at this address, such as localhost:8080, rather than printing it."`
+	Interval time.Duration `default:"2s"                                                                                                 help:"How often the web view reads the graph again."`
 }
 
 // A node is one composed resource and the edges leading into it.
@@ -209,32 +213,22 @@ func main() {
 }
 
 func (c *cli) Run() error {
-	ctx, cancel := context.WithTimeout(context.Background(), c.Timeout)
-	defer cancel()
-
 	dyn, mapper, err := c.connect()
 	if err != nil {
 		return err
 	}
 
-	xr, err := c.getComposite(ctx, dyn, mapper)
+	if c.Serve != "" {
+		return c.serve(dyn, mapper)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), c.Timeout)
+	defer cancel()
+
+	xr, nodes, err := c.read(ctx, dyn, mapper)
 	if err != nil {
 		return err
 	}
-
-	nodes, err := readGraph(xr)
-	if err != nil {
-		return err
-	}
-
-	// The edges say what waits for what; the composed resources say where
-	// each one has got to. Both are needed to read a graph mid-reconcile.
-	observe(ctx, dyn, mapper, xr.GetNamespace(), nodes)
-
-	// Last, because it overrides both: what the XR says the graph is holding
-	// back, including resources that have no reference to observe.
-	nodes = readPending(xr, nodes)
-	markDeleted(xr, nodes)
 
 	out := renderTree(xr, nodes, style{color: c.colorize(), edges: c.Edges})
 	if c.Dot {
@@ -246,6 +240,31 @@ func (c *cli) Run() error {
 	}
 
 	return nil
+}
+
+// read fetches the composite and everything needed to say where its graph
+// has got to.
+func (c *cli) read(ctx context.Context, dyn dynamic.Interface, mapper meta.RESTMapper) (*unstructured.Unstructured, []*node, error) {
+	xr, err := c.getComposite(ctx, dyn, mapper)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	nodes, err := readGraph(xr)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// The edges say what waits for what; the composed resources say where
+	// each one has got to. Both are needed to read a graph mid-reconcile.
+	observe(ctx, dyn, mapper, xr.GetNamespace(), nodes)
+
+	// Last, because it overrides both: what the XR says the graph is holding
+	// back, including resources that have no reference to observe.
+	nodes = readPending(xr, nodes)
+	markDeleted(xr, nodes)
+
+	return xr, nodes, nil
 }
 
 // colorize reports whether to paint the tree. "auto" means only when stdout
