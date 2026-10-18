@@ -233,16 +233,26 @@ func TestState(t *testing.T) {
 		node   node
 		want   string
 	}{
-		"Pending":  {reason: "A resource Crossplane hasn't created yet is pending.", node: node{}, want: "pending"},
-		"Creating": {reason: "A resource that exists but isn't ready is still creating.", node: node{Exists: true}, want: "creating"},
-		"Ready":    {reason: "A resource reporting Ready releases what depends on it.", node: node{Exists: true, Ready: true}, want: "ready"},
+		"AboutToBeCreated": {reason: "A reference with no object yet is creating: Crossplane applies it next.", node: node{}, want: "creating"},
+		"Creating":         {reason: "A resource that exists but isn't ready is still creating.", node: node{Exists: true}, want: "creating"},
+		"Pending": {
+			reason: "A resource the graph holds back from creation is pending, as status.crossplane.pendingResources calls it.",
+			node:   node{Held: true, Operation: "Create"},
+			want:   "pending",
+		},
+		"Held": {
+			reason: "A resource the graph holds back from deletion is held.",
+			node:   node{Exists: true, Ready: true, Held: true, Operation: "Delete"},
+			want:   "held",
+		},
+		"Ready": {reason: "A resource reporting Ready releases what depends on it.", node: node{Exists: true, Ready: true}, want: "ready"},
 		"Deleting": {
 			reason: "Deleting wins over ready: a resource on its way out is what teardown is waiting for.",
 			node:   node{Exists: true, Ready: true, Deleting: true},
 			want:   "deleting",
 		},
 		"Deleted": {
-			reason: "A resource teardown has removed is deleted, not pending: it isn't coming back.",
+			reason: "A resource teardown has removed is deleted, not creating: it isn't coming back.",
 			node:   node{Missing: true, Deleted: true},
 			want:   "deleted",
 		},
@@ -275,8 +285,8 @@ func TestRenderTree(t *testing.T) {
 		"◐ creating    app",
 		"← database",
 		"wave 2 ",
-		"○ pending     ingress",
-		"1 ready · 1 creating · 1 pending",
+		"◐ creating    ingress",
+		"1 ready · 2 creating",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("renderTree(...): missing %q in:\n%s", want, got)
@@ -460,7 +470,7 @@ func TestReadPending(t *testing.T) {
 
 	want := map[string]string{
 		// Held back from creation, and referenced nowhere else.
-		"subnet": "blocked",
+		"subnet": "pending",
 		// Held back from deletion, and deadlocked, which outranks it.
 		"vpc": "deadlocked",
 	}
@@ -498,7 +508,7 @@ func TestRenderTreeShowsHeldAndDeadlocked(t *testing.T) {
 	t.Logf("\n%s", got)
 
 	for _, want := range []string{
-		"blocked",                         // held back from creation
+		"⊘ pending",                       // held back from creation
 		"deadlocked",                      // and the state that outranks all
 		"⇠ cluster-kubeconfig",            // a required resource, not a node
 		"deadlocked, so waiting will not", // its own block at the bottom
@@ -559,9 +569,9 @@ func TestMarkDeleted(t *testing.T) {
 		want     string
 	}{
 		"AboutToBeCreated": {
-			reason: "Crossplane writes a reference before it applies the resource, so a live XR's missing object is pending.",
+			reason: "Crossplane writes a reference before it applies the resource, so a live XR's missing object is creating.",
 			node:   node{Missing: true},
-			want:   "pending",
+			want:   "creating",
 		},
 		"GoneDuringTeardown": {
 			reason:   "During teardown a missing object has been deleted, and its reference just hasn't been dropped yet.",
@@ -573,7 +583,7 @@ func TestMarkDeleted(t *testing.T) {
 			reason:   "An object that couldn't be read, for a reason other than not existing, is no evidence it was deleted.",
 			deleting: true,
 			node:     node{},
-			want:     "pending",
+			want:     "creating",
 		},
 		"Held": {
 			reason:   "What the graph is holding back is the more useful answer than what the resource is doing.",

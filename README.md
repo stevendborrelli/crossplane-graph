@@ -21,13 +21,13 @@ wave 1 ────────────────────────�
 
 wave 2 ───────────────────────────────────────────────────────────
  ✔ ready       database    NopResource
- ⊘ blocked     instance    NopResource  waiting for [sg subnet-b] to be ready
+ ⊘ pending     instance    NopResource  waiting for [sg subnet-b] to be ready
 
 wave 3 ───────────────────────────────────────────────────────────
- ⊘ blocked     app         NopResource  waiting for [instance] to be ready
- ⊘ blocked     backup      NopResource  waiting for [database] to be ready
+ ⊘ pending     app         NopResource  waiting for [instance] to be ready
+ ⊘ pending     backup      NopResource  waiting for [database] to be ready
 
-4 ready · 3 creating · 3 blocked
+4 ready · 3 creating · 3 pending
 ```
 
 It answers the two questions ordering raises most often: did the dependencies
@@ -105,13 +105,27 @@ Everything comes from the API server. It never runs a function.
   their own.
 - **Each resource's state** comes from fetching the composed resource itself.
 
+The states:
+
+| State | Meaning |
+|---|---|
+| `ready` | The resource reports Ready, so what depends on it can be created. |
+| `creating` | The resource exists but isn't ready, or Crossplane has written its reference and is about to apply it. |
+| `pending` | The graph is holding back its creation until what it depends on is ready. |
+| `held` | The graph is holding back its deletion until what depends on it is gone. |
+| `deleting` | The resource is being deleted. |
+| `deleted` | Teardown has removed it, and its reference hasn't been dropped yet. |
+| `deadlocked` | Waiting won't resolve it, and someone has to act. |
+
+`pending` and `held` both come from `status.crossplane.pendingResources`.
+
 ## Caveats
 
 - **Readiness is a best-effort read.** Crossplane decides readiness from the
   function pipeline's verdict, which isn't stored anywhere this tool can read.
   So it judges each resource by its own conditions instead, which for most
   resources agrees. The two can briefly disagree, for example showing a
-  dependency ready while its dependent is still blocked on it, until
+  dependency ready while its dependent is still pending on it, until
   Crossplane's next reconcile.
 
 ## License

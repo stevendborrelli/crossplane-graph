@@ -106,16 +106,16 @@ type node struct {
 	wave int
 }
 
-// The states a node can be in. A resource reaches ready, creating, pending,
-// deleting and deleted on its own; blocked, held and deadlocked are the
-// graph's doing, and are the states this tool exists to explain.
+// The states a node can be in. A resource reaches ready, creating, deleting
+// and deleted on its own; pending, held and deadlocked are the graph's doing,
+// and are the states this tool exists to explain. Pending is named for
+// status.crossplane.pendingResources, where Crossplane reports it.
 const (
 	stateReady      = "ready"
 	stateCreating   = "creating"
-	statePending    = "pending"
 	stateDeleting   = "deleting"
 	stateDeleted    = "deleted"
-	stateBlocked    = "blocked"
+	statePending    = "pending"
 	stateHeld       = "held"
 	stateDeadlocked = "deadlocked"
 )
@@ -159,7 +159,7 @@ func (n node) glyph() (string, string) {
 		return "✖", red
 	case stateDeadlocked:
 		return "⨯", red
-	case stateBlocked, stateHeld:
+	case statePending, stateHeld:
 		return "⊘", yellow
 	case stateDeleted:
 		return "–", gray
@@ -175,7 +175,10 @@ func (n node) glyph() (string, string) {
 // on its own, so it must not be hidden behind a resource that also happens
 // to be deleting. Below that, being held by the graph outranks the
 // resource's own state, because "Crossplane won't do this yet" is the answer
-// to the question someone is asking, and "pending" or "ready" is not.
+// to the question someone is asking, and "creating" or "ready" is not.
+//
+// A resource with a reference but no object yet is creating: Crossplane
+// writes the reference just before it applies the resource.
 func (n node) state() string {
 	switch {
 	case n.Deadlocked:
@@ -183,13 +186,11 @@ func (n node) state() string {
 	case n.Held && n.Operation == "Delete":
 		return stateHeld
 	case n.Held:
-		return stateBlocked
+		return statePending
 	case n.Deleting:
 		return stateDeleting
 	case n.Deleted:
 		return stateDeleted
-	case !n.Exists:
-		return statePending
 	case n.Ready:
 		return stateReady
 	default:
@@ -501,7 +502,7 @@ func readPending(xr *unstructured.Unstructured, nodes []*node) []*node {
 }
 
 // observe fills in each node's live state. A resource that can't be fetched
-// is reported as pending rather than failing the run: mid-teardown, half the
+// is reported as creating rather than failing the run: mid-teardown, half the
 // graph is legitimately gone.
 func observe(ctx context.Context, dyn dynamic.Interface, mapper meta.RESTMapper, ns string, nodes []*node) {
 	for _, n := range nodes {
@@ -556,11 +557,11 @@ func observe(ctx context.Context, dyn dynamic.Interface, mapper meta.RESTMapper,
 
 // markDeleted marks the resources an XR's teardown has already removed.
 //
-// A reference with no object behind it is otherwise pending: Crossplane
+// A reference with no object behind it is otherwise creating: Crossplane
 // writes the reference before it applies the resource, so for a moment that
 // is exactly right. During teardown it means the opposite - the object was
 // deleted, and its reference simply hasn't been dropped yet - and reading it
-// as pending suggests Crossplane is about to create it.
+// as creating suggests Crossplane is about to create it.
 //
 // A resource the graph is holding back is left alone: its held state is the
 // more useful answer.
@@ -925,8 +926,7 @@ func renderTally(w *strings.Builder, counts map[string]int, st style) {
 	}{
 		{stateReady, green},
 		{stateCreating, yellow},
-		{stateBlocked, yellow},
-		{statePending, gray},
+		{statePending, yellow},
 		{stateHeld, yellow},
 		{stateDeleting, red},
 		{stateDeleted, gray},
@@ -1055,15 +1055,17 @@ func dotStyle(n *node) string {
 	switch n.state() {
 	case stateDeadlocked:
 		return " style=\"rounded,filled\" fillcolor=mistyrose penwidth=2"
-	case stateBlocked, stateHeld:
+	case statePending, stateHeld:
 		return " style=\"rounded,bold\""
-	case statePending:
-		return " style=\"rounded,dashed\""
 	case stateDeleted:
 		return " style=\"rounded,dotted\""
-	default:
-		return ""
 	}
+
+	if !n.Exists {
+		return " style=\"rounded,dashed\""
+	}
+
+	return ""
 }
 
 func dotColor(n *node) string {
@@ -1072,7 +1074,7 @@ func dotColor(n *node) string {
 		return "green4"
 	case stateDeleting, stateDeadlocked:
 		return "red3"
-	case stateCreating, stateBlocked, stateHeld:
+	case stateCreating, statePending, stateHeld:
 		return "goldenrod3"
 	default:
 		return "gray60"
